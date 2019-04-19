@@ -1,4 +1,4 @@
-#Datalogger using ArduinoJSON and SPIFFS
+# Datalogger using ArduinoJSON and SPIFFS
 
 It should be able to store data in the SPIFFS storage as well as push it to the cloud services. 
 
