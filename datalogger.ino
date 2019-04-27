@@ -10,12 +10,31 @@
 #define ONE_HOUR 3600000UL
 #include <WiFiUdp.h>
 #include <Ticker.h>
+#include <TimeLib.h>
+
+
+bool firebasebatchsync=false;
+int firebasesynctimeout=20000,lastfirebasesync=millis();
 ADC_MODE(ADC_VCC);
 Ticker timer;
 #include <FirebaseArduino.h>
 
 #include "credentials.h"
-const char * hostName = "esp-async";
+
+  FSInfo fs_info;
+String dirname="/csv/";
+String fileName="currentdata.csv";
+String oldFileName="data";
+String pathname=dirname+fileName;
+#define NUM_READINGS 4
+float dataLog[NUM_READINGS];
+String dataLogTitle[]={"Time","Vcc","heap","heap"};
+int dataLogTimeout=5000; int prevDataLogTime=0;
+int csvFileSize=1024;
+int maxcsvFileSize=100*1024;
+
+
+const char * hostName = "esp-datalogger";
 const char* http_username = "admin";
 const char* http_password = "admin";
 
@@ -186,13 +205,13 @@ const unsigned long intervalNTP = ONE_HOUR; // Update the time every hour
 unsigned long prevNTP = 0;
 unsigned long lastNTPResponse = millis();
 
-const unsigned long intervalTemp = 60000;   // Do a temperature measurement every minute
+const unsigned long intervalTemp = 1000;   // Do a temperature measurement every minute
 unsigned long prevTemp = 0;
 bool tmpRequested = false;
 const unsigned long DS_delay = 750;         // Reading the temperature from the DS18x20 can take up to 750ms
 
-uint32_t timeUNIX = 0;  
-
+uint32_t timeUNIX = 0, epoch=1556367049;uint32_t actualTime=0;  
+#define TIMEZONE 5.5
 
 void setup(){
   Serial.begin(115200);
@@ -243,10 +262,174 @@ void setup(){
   server.on("/heap", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send(200, "text/plain", String(ESP.getFreeHeap()));
   });
- server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on("/scan", HTTP_GET, [](AsyncWebServerRequest *request){
+  String json = "[";
+  int n = WiFi.scanComplete();
+  if(n == -2){
+    WiFi.scanNetworks(true);
+  } else if(n){
+    for (int i = 0; i < n; ++i){
+      if(i) json += ",";
+      json += "{";
+      json += "\"rssi\":"+String(WiFi.RSSI(i));
+      json += ",\"ssid\":\""+WiFi.SSID(i)+"\"";
+      json += ",\"bssid\":\""+WiFi.BSSIDstr(i)+"\"";
+      json += ",\"channel\":"+String(WiFi.channel(i));
+      json += ",\"secure\":"+String(WiFi.encryptionType(i));
+      json += ",\"hidden\":"+String(WiFi.isHidden(i)?"true":"false");
+      json += "}";
+    }
+    WiFi.scanDelete();
+    if(WiFi.scanComplete() == -2){
+      WiFi.scanNetworks(true);
+    }
+  }
+  json += "]";
+  request->send(200, "application/json", json);
+  json = String();
+});
+  server.on("/time", HTTP_GET, [](AsyncWebServerRequest *request){
+    String response="";
+    response=String(day())+"/";
+    response +=String(month())+"/";
+    response +=String(year())+"-";
+    response +=String(hour())+":";
+    response +=String(minute())+":";
+    response +=String(second());
+    Serial.print("Time requested:");Serial.print(day());Serial.print("/");Serial.print(month());Serial.print("/");Serial.print(year());
+    Serial.println(response);
+    request->send(200, "text/plain", response);
+    response=String();
+
+  });
+ server.on("/webpage", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send(200, "text/html", webpage);
   });
- // server.serveStatic("/", SPIFFS, "/").setDefaultFile("index.htm");
+ server.on("/delete", HTTP_GET, [](AsyncWebServerRequest *request){
+  Serial.print("Delete requested:");
+  String response="<meta http-equiv='refresh' content='10;url=/csv.html' />";
+  if(request->hasParam("fileName")){
+    Serial.println("Parameter filename found");
+  AsyncWebParameter* p = request->getParam("fileName");
+  if(SPIFFS.exists(p->value())){
+    Serial.print("File found");Serial.print(p->value());
+    if(    SPIFFS.remove(p->value())){
+    Serial.print("\t File delete Successful");
+    response+="<h1>File Delete Successful</h1>";
+    response +="Successfully deleted file ";
+    response +=p->value();
+    response  +="\nNow refresh browser";
+    }
+    else {
+      Serial.println("Delete unsuccessfule");
+      response+="File delete unsuccessful for file ";
+      response +=p->value();
+      
+    }
+    response+="\ Operation Successful";
+    
+  }
+  else {
+    Serial.print("File not found:");Serial.println(p->value());
+    response +="<h1> Not found</h1>";
+    response += "File not found";
+    response +=p->value();
+  }
+
+
+  } 
+  else {
+    response +="<h1> Parameter Not found</h1>";
+    response += "Parameter fileName not found";
+//    response += p->value();
+//    Serial.print("Parameter not found\t");Serial.println(p->value());
+    
+  }
+    Serial.println(response);
+
+    request->send(200, "text/html", response);
+
+  });
+
+  server.on("/firebase", HTTP_GET, [](AsyncWebServerRequest *request){
+  Serial.print("Delete requested:");
+  String response;//="<meta http-equiv='refresh' content='10;url=/csv.html' />";
+  if(request->hasParam("batchsync")){
+    Serial.println("batch sync Parameter filename found");
+  AsyncWebParameter* p = request->getParam("batchsync");
+  if(p->value()=="true")
+          firebasebatchsync=true;
+  else
+          firebasebatchsync=false;
+  }
+  if(request->hasParam("firebasesyncsec")){
+  AsyncWebParameter* p = request->getParam("firebasesyncsec");
+      firebasesynctimeout=p->value().toInt();
+  }    
+    request->send(200, "text/html", response);
+
+  });
+
+  server.on("/list", HTTP_GET, [](AsyncWebServerRequest *request){
+/*
+String str = "";
+Dir dir = SPIFFS.openDir("/");
+    str+="<table><tr><th>Directory</th><th>Size</th></tr>";
+while (dir.next()) {
+    str +=  "<tr><td><a href='csv.html?fileName=";
+    str += dir.fileName();
+    str += "'>";
+    str +=dir.fileName();
+    str +="</a></td><td><a href='";
+    str += dir.fileName();
+    str += "' download>" ;   
+    str += dir.fileSize();
+    str += "</a></td><td><a href='delete?fileName=";
+    str += dir.fileName();
+    str +="'>";
+    str +="Delete";
+    str += "</a>";
+    str +="</td></tr>";
+}
+  str += "</table>";
+  SPIFFS.remove("/dirlist.html");
+
+  File f=SPIFFS.open("/dirlist.html","w");
+  f.print(str);
+  f.close();
+  Serial.print(str);
+//    request->send(200, "text/html", str.c_str());
+//    str="";
+  request->send(SPIFFS, "/dirlist.html");
+ */
+
+ String str = "";
+Dir dir = SPIFFS.openDir("/");
+while (dir.next()) {
+    str += dir.fileName();
+    str += ",";
+    str += dir.fileSize();
+    str += "\r\n";
+}
+  Serial.print(str);
+//    request->send(200, "text/plain", str);
+  SPIFFS.remove("/dirlist.html");
+
+  File f=SPIFFS.open("/dirlist.txt","w");
+  f.print(str);
+  f.close();
+  
+  request->send(SPIFFS, "/dirlist.txt");
+str="";
+
+ });
+
+  server.on("/webpage", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(200, "text/html", webpage);
+  });
+  
+
+ server.serveStatic("/", SPIFFS, "/").setDefaultFile("csv.html");
 
   server.onNotFound([](AsyncWebServerRequest *request){
     Serial.printf("NOT_FOUND: ");
@@ -294,12 +477,12 @@ void setup(){
 
     request->send(404);
   });
-  server.onFileUpload([](AsyncWebServerRequest *request, const String& filename, size_t index, uint8_t *data, size_t len, bool final){
+  server.onFileUpload([](AsyncWebServerRequest *request, const String& fileName, size_t index, uint8_t *data, size_t len, bool final){
     if(!index)
-      Serial.printf("UploadStart: %s\n", filename.c_str());
+      Serial.printf("UploadStart: %s\n", fileName.c_str());
     Serial.printf("%s", (const char*)data);
     if(final)
-      Serial.printf("UploadEnd: %s (%u)\n", filename.c_str(), index+len);
+      Serial.printf("UploadEnd: %s (%u)\n", fileName.c_str(), index+len);
   });
   server.onRequestBody([](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
     if(!index)
@@ -313,15 +496,23 @@ void setup(){
 
    timer.attach(5, getData);
   startUDP();  
-    WiFi.hostByName(ntpServerName, timeServerIP); // Get the IP address of the NTP server
+  WiFi.hostByName(ntpServerName, timeServerIP); // Get the IP address of the NTP server
   Serial.print("Time server IP:\t");
   Serial.println(timeServerIP);
 
   sendNTPpacket(timeServerIP);
   delay(500);
   Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
+  setSyncProvider(getNtpTime);
+  setSyncInterval(300);
 
-
+  File f=SPIFFS.open(".ntptime","r");
+  if(f){
+    uint32_t newtime=f.parseInt();
+    setTime(newtime);
+    epoch=newtime;
+    f.close();
+  }
 }
 int n = 0;
 void loop(){
@@ -334,7 +525,7 @@ void loop(){
     sendNTPpacket(timeServerIP);
   }
 
-  uint32_t time = getTime();                   // Check if the time server has responded, if so, get the UNIX time
+  uint32_t time = getNtpTime();                   // Check if the time server has responded, if so, get the UNIX time
   if (time) {
     timeUNIX = time;
     Serial.print("NTP response:\t");
@@ -345,8 +536,9 @@ void loop(){
     Serial.flush();
     ESP.reset();
   }
-
   if (timeUNIX != 0) {
+    Serial.print("timeUNIX=");Serial.println(timeUNIX);
+    /*
     if (currentMillis - prevTemp > intervalTemp) {  // Every minute, request the temperature
 //      tempSensors.requestTemperatures(); // Request the temperature from the sensor (it takes some time to read it)
       tmpRequested = true;
@@ -354,7 +546,7 @@ void loop(){
       Serial.println("Temperature requested");
     }
     if (currentMillis - prevTemp > DS_delay && tmpRequested) { // 750 ms after requesting the temperature
-      uint32_t actualTime = timeUNIX + (currentMillis - lastNTPResponse) / 1000;
+      actualTime = timeUNIX + (currentMillis - lastNTPResponse) / 1000;
       // The actual time is the last NTP time plus the time that has elapsed since the last NTP response
       tmpRequested = false;
       float temp = ESP.getVcc();
@@ -364,20 +556,40 @@ void loop(){
       Serial.printf("Appending temperature to file: %lu,", actualTime);
       Serial.println(temp);
       File tempLog = SPIFFS.open("/temp.csv", "a"); // Write the time and the temperature to the csv file
+      if(tempLog){
       tempLog.print(actualTime);
       tempLog.print(',');
-      tempLog.println(ESP.getVcc());
+      tempLog.print(ESP.getVcc());
+      tempLog.print(',');
+      tempLog.print(ESP.getFreeHeap());
+      tempLog.print(',');
+      tempLog.println(ESP.getFreeSketchSpace());
       tempLog.close();
-    }
-  } else {                                    // If we didn't receive an NTP response yet, send another request
+      }
+      else
+        Serial.println("Error opening templog");
+    }*/
+  } 
+  else {                                    // If we didn't receive an NTP response yet, send another request
+    Serial.println("No response from NTP server; resend NTP packet again");
     sendNTPpacket(timeServerIP);
     delay(500);
   }
   yield();
   // put your main code here, to run repeatedly:
-
-
+      String time1=hour()+"."+minute();
+      dataLog[0]=timeUNIX;
+      dataLog[1]= dataLog[1]==0?(float)ESP.getVcc()/1000.0 : (dataLog[1]+(float)ESP.getVcc()/1000.0)/2;
+      dataLog[2]=dataLog[2]==0?ESP.getFreeHeap():(dataLog[2]+ESP.getFreeHeap())/2;
+      if(millis()-prevDataLogTime>dataLogTimeout){
+      logReadings();
+      dataLog[1]=0;
+      dataLog[2]=0;
+      prevDataLogTime=millis();
+      }
+  yield();
   handleFirebase();
+  delay(1000);
   
 }
 
@@ -447,19 +659,30 @@ void sendNTPpacket(IPAddress& address) {
   UDP.write(packetBuffer, NTP_PACKET_SIZE);
   UDP.endPacket();
 }
-unsigned long getTime() { // Check if the time server has responded, if so, get the UNIX time, otherwise, return 0
+long getNtpTime() { // Check if the time server has responded, if so, get the UNIX time, otherwise, return 0
   if (UDP.parsePacket() == 0) { // If there's no response (yet)
-    return 0;
+    Serial.print("No response from NTP");
+    return epoch;
   }
   UDP.read(packetBuffer, NTP_PACKET_SIZE); // read the packet into the buffer
   // Combine the 4 timestamp bytes into one 32-bit number
   uint32_t NTPTime = (packetBuffer[40] << 24) | (packetBuffer[41] << 16) | (packetBuffer[42] << 8) | packetBuffer[43];
   // Convert NTP time to a UNIX timestamp:
   // Unix time starts on Jan 1 1970. That's 2208988800 seconds in NTP time:
-  const uint32_t seventyYears = 2208988800UL;
+  const uint32_t seventyYears = 2208988800L;
   // subtract seventy years:
+  epoch=NTPTime - seventyYears+(long)(TIMEZONE*3600 ) ; //ADD 5.5 Hours (For GMT+5:30)
+
   uint32_t UNIXTime = NTPTime - seventyYears;
-  return UNIXTime;
+  Serial.print("\nUNIXTime=");Serial.println(epoch);
+  SPIFFS.remove(".ntptime");
+  File f=SPIFFS.open(".ntptime","w");
+  if(f){
+    Serial.print("Writing new time to .ntptime");Serial.println(epoch);
+    f.print(epoch);
+    f.close();
+  }
+  return epoch;
 }
 
 /*__________________________________________________________HELPER_FUNCTIONS__________________________________________________________*/
@@ -474,29 +697,33 @@ String formatBytes(size_t bytes) { // convert sizes in bytes to KB and MB
   }
 }
 
-String getContentType(String filename) { // determine the filetype of a given filename, based on the extension
+String getContentType(String fileName) { // determine the filetype of a given fileName, based on the extension
   
-  if (filename.endsWith(".html")) return "text/html";
-  else if (filename.endsWith(".css")) return "text/css";
-  else if (filename.endsWith(".js")) return "application/javascript";
-  else if (filename.endsWith(".ico")) return "image/x-icon";
-  else if (filename.endsWith(".gz")) return "application/x-gzip";
+  if (fileName.endsWith(".html")) return "text/html";
+  else if (fileName.endsWith(".css")) return "text/css";
+  else if (fileName.endsWith(".js")) return "application/javascript";
+  else if (fileName.endsWith(".ico")) return "image/x-icon";
+  else if (fileName.endsWith(".gz")) return "application/x-gzip";
   return "text/plain";
 }
 
 void handleFirebase(){
+  yield();
+  if(millis()-lastfirebasesync>firebasesynctimeout){
+    lastfirebasesync=millis();
     // set value
-  Firebase.setFloat("number", 42.0);
+  String lastsync=String(year())+"/"+month()+"/"+day()+"-"+hour()+":"+minute()+":"+second();
+
+  Firebase.setString("lastsync", lastsync);
   // handle error
   if (Firebase.failed()) {
-      Serial.print("setting /number failed:");
+      Serial.print("setting /lastsync failed:");
       Serial.println(Firebase.error());  
       return;
   }
-  delay(1000);
+//  delay(1000);
   
   // update value
-  Firebase.setFloat("number", ESP.getVcc()/1000.0);
   // handle error
   if (Firebase.failed()) {
       Serial.print("setting /number failed:");
@@ -507,36 +734,41 @@ void handleFirebase(){
 
   // get value 
   Serial.print("number: ");
-  Serial.println(Firebase.getFloat("number"));
+  Serial.println(Firebase.getString("lastsync"));
   delay(1000);
 
   // remove value
-  Firebase.remove("number");
-  delay(1000);
+//  Firebase.remove("lastsync");
+//  delay(1000);
 
   // set string value
-  Firebase.setString("message", "hello world");
-  // handle error
-  if (Firebase.failed()) {
-      Serial.print("setting /message failed:");
-      Serial.println(Firebase.error());  
-      return;
-  }
-  delay(1000);
+
   
   // set bool value
-  Firebase.setBool("truth", false);
+  Firebase.setBool("batchsync", firebasebatchsync);
+ 
+  delay(1000);
+  Firebase.setInt ("syncInterval",firebasesynctimeout);
+  delay(1000);
   // handle error
   if (Firebase.failed()) {
       Serial.print("setting /truth failed:");
       Serial.println(Firebase.error());  
       return;
   }
-  delay(1000);
-
+ delay(1000);
+String name;
   // append a new value to /logs
-  String name = Firebase.pushInt("logs", ESP.getFreeHeap());
+  String jsonText="{\"";
+  jsonText+=dataLogTitle[0];
+  jsonText+="\":";
+  jsonText+=dataLog[0];
+  for (int i=1;i<NUM_READINGS;i++)
+     jsonText+= ",\""+dataLogTitle[i]+"\":"+dataLog[i];
+     jsonText +="}";
   // handle error
+  yield();
+  name  = Firebase.pushString("/data/",jsonText);
   if (Firebase.failed()) {
       Serial.print("pushing /logs failed:");
       Serial.println(Firebase.error());  
@@ -544,5 +776,80 @@ void handleFirebase(){
   }
   Serial.print("pushed: /logs/");
   Serial.println(name);
-  delay(1000);
+  delay(2000);
+  }
+}
+
+void readFile(){
+  
+}
+void logReadings(){
+  
+SPIFFS.info(fs_info);
+
+  if(!SPIFFS.exists(pathname)){  //File doesn't exist, create a new file and write titles to it
+    //File did not exist. Creating in w mode. We write title values
+      File f=SPIFFS.open(pathname,"w");
+      if (!f) {
+        Serial.println("file open failed");
+        }
+      else{
+
+      Serial.print("File did not exist, creating new file:");
+      Serial.println(pathname);
+
+      f.print(dataLogTitle[0]);
+      for(int i=1;i<NUM_READINGS;i++){
+        f.print(",");f.print(dataLogTitle[i]);
+      }
+      f.println();
+      }
+ 
+    
+  }
+  else{//File exists open in append mode to write readings
+      Serial.print("File already exists, open in append mode");
+      Serial.println(pathname);
+      File f=SPIFFS.open(pathname,"a");
+        
+
+      // Now writing readingss 
+      
+      if (!f) {
+        Serial.println("file open failed");
+        }
+      else{
+      Serial.println("Now writing readings");
+      f.print(dataLog[0]);
+      for(int i=1;i<NUM_READINGS;i++){
+        f.print(",");f.print(dataLog[i]);
+      }
+        
+      f.println();
+      if(f.size()>csvFileSize){
+      // print the hour, minute and second:
+
+  
+        String newpathname=dirname+oldFileName+"-"+year()+"-"+month()+"-"+day()+"-"+hour()+"-"+minute()+"-"+second()+".csv";
+        int i=0;
+        while(SPIFFS.exists(newpathname)){//New pathname doesn't exist
+          
+          
+          newpathname=newpathname+"-"+"duplicate"+i++;
+        }
+         SPIFFS.rename(pathname, newpathname);
+         Serial.print("File exceeds 20kb, renaming file:");
+         Serial.println(newpathname);      
+      f.close();
+      }
+
+
+
+      }
+        
+
+  }  
+ 
+ Serial.println("Wrote readings");
+  
 }
