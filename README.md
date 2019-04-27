@@ -14,7 +14,7 @@ This project is a "proof-of-concept" of a general purpose data-logger using esp8
 * Currently, it allows, browsing files on the esp-8266
 * Viewing Contents of CSV Files in the webbrowser
 * Download Files from browser
-* editing html files using http://edatalogger/edit
+* editing html files using http://esp-datalogger.local/
 
 ## Description
 
