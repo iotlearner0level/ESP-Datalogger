@@ -1,5 +1,12 @@
 # Datalogger using ArduinoJSON and SPIFFS
 
+- To run the program, enter wifi credentials, firebase details in credentials.h
+- Compile and run the code in Arduino
+- Upload the html/javascript files using this tool https://github.com/esp8266/arduino-esp8266fs-plugin
+- Launch the webbrowser at: http://esp-datalogger.local/
+
+* If the esp crashes too much, increase the firebase/SPIFFS timeout
+
 ## Experimental!
 
 This project is a "proof-of-concept" of a general purpose data-logger using esp8266
