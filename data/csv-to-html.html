@@ -1,0 +1,129 @@
+<html>
+    <head>
+        <title>CSV to HTML-table Converter/Viewer</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="title" content="CSV to HTML-table Converter/Viewer">
+        <meta name="description" content="Javascript light-weight tool to convert CSV files into HTML table code online, view CSV files online.">
+        <link href="https://fonts.googleapis.com/css?family=Lato" rel="preload" as="style" onload="this.rel='stylesheet'">
+        <style type="text/css">
+            body {
+                margin: 0;
+                font-family: 'Lato',sans-serif;
+                text-align: center
+            }
+
+            header {
+                font-size: 1.4em;
+                padding: 1.2em 5px;
+                color: #131418
+            }
+
+            input {
+                font-family: 'Lato';
+                font-size: 1.2em
+            }
+
+            form {
+                background-color: #131418;
+                padding: 3em 5px 2em 5px;
+                color: white
+            }
+
+            input[type='button'] {
+                color: black;
+                padding: 5px 20px;
+                border-radius: 2px;
+                border: none
+            }
+
+            table {
+                display: inline-table;
+                border-collapse: collapse
+            }
+
+            table,td,tr {
+                border-top: 1px solid grey;
+                border-bottom: 1px solid grey;
+                padding: 5px;
+                margin: 1em
+            }
+
+            #container {
+                padding: 1em 5px
+            }
+
+            #container textarea {
+                padding: 8px;
+                font-size: 1em;
+                border-radius: 5px;
+                outline: none;
+                font-family: 'Lato';
+                resize: vertical;
+                max-width: 720px;
+                width: 100%
+            }
+
+            #container input {
+                padding: 8px 15px;
+                font-size: 1em;
+                cursor: pointer;
+                transition: .2s all;
+                border-radius: 5px;
+                background-color: #bbb;
+                outline: none
+            }
+
+            #container input:hover {
+                background-color: #131418;
+                color: white
+            }
+
+            footer {
+                padding: 40px 0 0 0;
+                font-size: .8em
+            }
+
+            footer a {
+                color: #0085ff;
+                text-decoration: none
+            }
+        </style>
+        <script type='text/javascript'>
+            var data, input;
+            function loadFile() {
+                var e, i, l = document.getElementById("preview");
+                document.getElementsByTagName("textarea")[0];
+                "function" == typeof window.FileReader ? (input = document.getElementById("fileinput")) ? input.files ? input.files[0] ? 2 != input.files[0].name.split(".csv").length ? l.innerHTML = "Please select a valid CSV file." : (e = input.files[0],
+                (i = new FileReader).onload = function() {
+                    var e, t = (data = i.result).split("\n"), n = [];
+                    for (e = 0; e < t.length; e++)
+                        console.log("<tr><td>" + t[e].split(",").join("</td><td>")),
+                        n.push("<tr><td>" + t[e].split(",").join("</td><td>") + "</td></tr>");
+                    n = "<table>" + n.join("") + "</table>",
+                    l.innerHTML = "<h2 style='margin-bottom: 5px;'>HTML Source</h2><textarea id='source'>" + n + "</textarea><h2 style='margin-bottom: 5px;'>CSV Preview</h2>" + n
+                }
+                ,
+                i.readAsText(e)) : l.innerHTML = "Please select a file before clicking 'Load'" : l.innerHTML = "This browser doesn't seem to support the `files` property of file inputs." : l.innerHTML = "Um, couldn't find the fileinput element." : l.innerHTML = "The file API isn't supported on this browser yet."
+            }
+        </script>
+    </head>
+    <body>
+        <header>CSV to HTML &lt;table &gt;Converter</header>
+        <form action='#' onsubmit="return false;">
+            <input type='file' id='fileinput'>
+            <input type='button' id='btnLoad' value='Load' onclick='loadFile();'>
+            <footer>
+                <a rel="license" href="http://creativecommons.org/licenses/by/4.0/" target="_blank">
+                    <img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by/4.0/80x15.png"/>
+                </a>
+                <br/>
+                This work is licensed under a <a rel="license" href="http://creativecommons.org/licenses/by/4.0/" target="_blank">Creative Commons Attribution 4.0 International License</a>
+                .<br>
+                Project by <a href="https://vocuzi.in/" target="_blank">@vocuzi</a>
+            </footer>
+        </form>
+        <div id="container">
+            <div id="preview"></div>
+        </div>
+    </body>
+</html>
