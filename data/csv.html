@@ -147,12 +147,12 @@ table tbody{
   <button class="tablinks" onClick="toggleContainer(event, 'liveviewcontainer')">Live!</button>
   <button class="tablinks" onClick="toggleContainer(event, 'firebasecontainer')">Firebase</button>
   <button class="tablinks" onClick="toggleContainer(event, 'helpviewcontainer')">Help</button>
-  <button class="tablinks" onClick="deleteFile()">Delete</button>
   
 
   <input type="text" id='inputfilename' vaue='/csv/csvdata.csv'/>
   <button class='time tablinks' onClick="getCSVFile()" >View </button>
   <button type="submit" onclick="(function(){ window.open(document.getElementById('inputfilename').value,'_blank' ) })()">Download!</button>
+  <button class="tablinks" onClick="deleteFile()">Delete</button>
 
 
 </div>
@@ -177,14 +177,19 @@ table tbody{
 -->
 
 </div>
-<div id='svgviewcontainer'  class="tabcontent"  ></div>
+<div id='svgviewcontainer'  class="tabcontent"  >
+  <svg id='svg1'>SVG HOLDER</svg>
+</div>
 <div id='liveviewcontainer'  class="tabcontent"  ></div>
 <div id='firebasecontainer'  class="tabcontent"  >
         <input type=text id='firebase-id' value=''>
         <input type=text id='firebase-syncsec' value='120'>
         <input type=checkbox id='firebase-batchsync' value=false> name="Batch Sync"
 </div>        
-<div id='helpviewcontainer'  class="tabcontent"  ></div>
+<div id='helpviewcontainer'  class="tabcontent" style="overflow: scroll; resize: both;">
+  <div id='helpcontents' ></div>
+  
+</div>
 
 <script>
 
@@ -213,7 +218,8 @@ function toggleContainer(evt, activesectionname) {
     console.log("Called getCSVFile()")
   }
 
-
+  if(activesectionname=="svgviewcontainer")
+      svgGraphPlotter();
  
 }
   
@@ -238,7 +244,7 @@ var jsonFile = new XMLHttpRequest();
   rawdata=jsonFile.responseText;
 
 
-  var htmlstr="<table>";head=0;
+  var htmlstr="<table id='tblCSVFile'>";head=0;
 //      console.log(reader.result)
   const lines = rawdata.split("\n").map(function(line){
 
@@ -309,7 +315,7 @@ var dirFile = new XMLHttpRequest();
     var helpFile = new XMLHttpRequest();
     helpFile.onreadystatechange = function() {
         if (helpFile.readyState== 4 && helpFile.status == 200) {
-            document.getElementById("helpviewcontainer").innerHTML = helpFile.responseText;
+            document.getElementById("helpcontents").innerHTML = helpFile.responseText;
 
 
         }}
@@ -469,6 +475,8 @@ function listFiles(){
 }
 function svgGraphPlotter(){
   
+  tbl1=document.getElementById("tblCSVFile");
+  
 } 
 
 function liveGraphPlotter(){
@@ -476,6 +484,29 @@ function liveGraphPlotter(){
 }
 
 function canvasGraphPlotter(){
+  
+}
+
+function sendSettings(){
+  var deleteFile = new XMLHttpRequest();
+
+
+deleteFile.onreadystatechange = function() {
+        if (deleteFile.readyState== 4 && deleteFile.status == 200) {
+//            document.getElementById("filelist").innerHTML = dirFile.responseText;
+//            var files=document.getElementById("filelist").innerHTML;
+              console.log(this.responseText);
+              listFiles();
+          
+
+}}
+
+
+    deleteFile.open("GET","/delete?fileName="+document.getElementById("inputfilename").value,true);
+    deleteFile.send();
+  
+  
+  
   
 }
   </script>
