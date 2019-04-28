@@ -30,7 +30,7 @@ String oldFileName="data";
 String pathname=dirname+fileName;
 #define NUM_READINGS 4
 float dataLog[NUM_READINGS];
-String dataLogTitle[]={"Time","Vcc","heap","heap-frag"};
+String dataLogTitle[]={"Time","Vcc","heap","heapfrag"};
 int dataLogTimeout=5000; int prevDataLogTime=0;
 int csvFileSize=1024;
 int maxcsvFileSize=100*1024;
@@ -68,7 +68,7 @@ void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventT
           floatrcd += (char) data[i];
           msg += (char) data[i];
         }
-      Serial.println("Line 44");char buf[floatrcd.length()]; floatrcd.toCharArray(buf,floatrcd.length());float dataRate = 10.0*(float) atof(buf);timer.detach();timer.attach_ms(dataRate, getData);Serial.print("Data rate:");Serial.println(dataRate);Serial.print("Data Received:");Serial.println(floatrcd);
+      Serial.println("Line 44");char buf[floatrcd.length()]; floatrcd.toCharArray(buf,floatrcd.length());float dataRate = 10.0*(float) atof(buf);timer.detach();timer.attach_ms(dataRate, sendWebSocketData);Serial.print("Data rate:");Serial.println(dataRate);Serial.print("Data Received:");Serial.println(floatrcd);
  
       } else {
         char buff[3];
@@ -99,7 +99,7 @@ void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventT
           msg += (char) data[i];Serial.print("LIne 69:msg=");Serial.println(msg);
           float dataRate = (float) atof((const char *) &data);
           timer.detach();
-          timer.attach(dataRate, getData);
+          timer.attach(dataRate, sendWebSocketData);
  
         }
       } else {
@@ -355,7 +355,25 @@ void setup(){
     request->send(200, "text/html", response);
 
   });
+  server.on("/settime", HTTP_GET, [](AsyncWebServerRequest *request){
+  Serial.print("Firebase settings requested:");
+  String response="";  response="Old time="+String(epoch)+" New time=";
 
+  if(request->hasParam("unixtime")){
+    Serial.println("UNIX Parameter filename found");
+  AsyncWebParameter* p = request->getParam("unixtime");
+  if(p->value().toInt()>0){
+        Serial.print("Valid time found; old time=");
+        Serial.print(epoch);
+        Serial.print(" New time=");
+        Serial.println(p->value().toInt());
+        epoch=p->value().toInt();
+  }
+  }
+  response += epoch;    
+  request->send(200, "text/html", response);
+
+  });
   server.on("/firebase", HTTP_GET, [](AsyncWebServerRequest *request){
   Serial.print("Firebase settings requested:");
   String response="";//="<meta http-equiv='refresh' content='10;url=/csv.html' />";
@@ -506,7 +524,7 @@ str=String ();
   server.begin();
 
 
-  timer.attach(5, getData);
+  timer.attach(5, sendWebSocketData);
   startUDP();  
   WiFi.hostByName(ntpServerName, timeServerIP); // Get the IP address of the NTP server
   Serial.print("Time server IP:\t");
@@ -535,8 +553,8 @@ void loop(){
   if (currentMillis - prevNTP > intervalNTP) { // Request the time from the time server every hour
     prevNTP = currentMillis;
     sendNTPpacket(timeServerIP);
-  }
-
+}
+/*
   uint32_t time = getNtpTime();                   // Check if the time server has responded, if so, get the UNIX time
   if (time) {
     timeUNIX = time;
@@ -548,6 +566,7 @@ void loop(){
     Serial.flush();
     ESP.reset();
   }
+  
   if (timeUNIX != 0) {
     Serial.print("timeUNIX=");Serial.println(timeUNIX);
     /*
@@ -580,10 +599,11 @@ void loop(){
       }
       else
         Serial.println("Error opening templog");
-    }*/
+    }
   } 
   else {                                    // If we didn't receive an NTP response yet, send another request
   }
+  */
   yield();
   // put your main code here, to run repeatedly:
       dataLog[0]=timeUNIX;
@@ -603,7 +623,7 @@ void loop(){
     lastfirebasesync=millis();
     handleFirebase();
   }
-  delay(1000);
+  delay(10);
   
 }
 
@@ -614,7 +634,7 @@ void startUDP() {
   Serial.print("Local port:\t");
   Serial.println(UDP.localPort());
 }
-void getData() {
+void sendWebSocketData() {
   int vcc = ESP.getVcc();Serial.println(vcc);
 //  Serial.println(bmp.readTemperature());
   String json = "{\"Vcc\":";
@@ -663,7 +683,7 @@ void getData() {
     json +=dataLogTitle[0];
     json +="\":";
     json +=dataLog[0];
-    for (int i=1;i<1;i++){
+    for (int i=1;i<NUM_READINGS;i++){
       json +=",\"";
       json +=dataLogTitle[i];
       json += "\"";
@@ -692,8 +712,8 @@ long getNtpTime() { // Check if the time server has responded, if so, get the UN
   if (UDP.parsePacket() == 0) { // If there's no response (yet)
     Serial.print("No response from NTP");
     Serial.println("\nNo response from NTP server; resend NTP packet again");
-    sendNTPpacket(timeServerIP);
-    delay(500);
+//    sendNTPpacket(timeServerIP);
+//    delay(500);
 
     return epoch;
   }
