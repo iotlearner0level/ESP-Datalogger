@@ -1,3 +1,4 @@
+
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <ArduinoOTA.h>
@@ -11,9 +12,9 @@
 #include <WiFiUdp.h>
 #include <Ticker.h>
 #include <TimeLib.h>
+//#include "ArduinoJson-v5.13.5.h"
 
-
-bool firebasebatchsync=false;
+bool firebasebatchsync=false, livedata=false;
 int firebasesynctimeout=20000,lastfirebasesync=millis();
 ADC_MODE(ADC_VCC);
 Ticker timer;
@@ -28,7 +29,7 @@ String oldFileName="data";
 String pathname=dirname+fileName;
 #define NUM_READINGS 4
 float dataLog[NUM_READINGS];
-String dataLogTitle[]={"Time","Vcc","heap","heap"};
+String dataLogTitle[]={"Time","Vcc","heap","heap-frag"};
 int dataLogTimeout=5000; int prevDataLogTime=0;
 int csvFileSize=1024;
 int maxcsvFileSize=100*1024;
@@ -125,6 +126,7 @@ void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventT
 
 // Serving a web page (from flash memory)
 // formatted as a string literal!
+/*
 char webpage[] PROGMEM = R"=====(
 <html>
 <!-- Adding a data chart using Chart.js -->
@@ -193,6 +195,7 @@ char webpage[] PROGMEM = R"=====(
 </body>
 </html>
 )=====";
+*/
 WiFiUDP UDP;                   // Create an instance of the WiFiUDP class to send and receive UDP messages
 
 IPAddress timeServerIP;        // The time.nist.gov NTP server's IP address
@@ -302,9 +305,10 @@ void setup(){
     response=String();
 
   });
- server.on("/webpage", HTTP_GET, [](AsyncWebServerRequest *request){
+ /*server.on("/webpage", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send(200, "text/html", webpage);
   });
+  */
  server.on("/delete", HTTP_GET, [](AsyncWebServerRequest *request){
   Serial.print("Delete requested:");
   String response="<meta http-equiv='refresh' content='10;url=/csv.html' />";
@@ -416,15 +420,22 @@ while (dir.next()) {
   SPIFFS.remove("/dirlist.html");
 
   File f=SPIFFS.open("/dirlist.txt","w");
-  f.print(str);
+  f.print(str.c_str());
   f.close();
   
   request->send(SPIFFS, "/dirlist.txt");
-str="";
+str=String ();
 
  });
 
-  server.on("/webpage", HTTP_GET, [](AsyncWebServerRequest *request){
+  server.on("/livedataon", HTTP_GET, [](AsyncWebServerRequest *request){
+    livedata=true;
+    String webpage="Hello, we will send livedata soon through websockets";
+    request->send(200, "text/html", webpage);
+  });
+  server.on("/livedataoff", HTTP_GET, [](AsyncWebServerRequest *request){
+    livedata=false;
+    String webpage="Livedata stream end";
     request->send(200, "text/html", webpage);
   });
   
@@ -494,7 +505,7 @@ str="";
   server.begin();
 
 
-   timer.attach(5, getData);
+  timer.attach(5, getData);
   startUDP();  
   WiFi.hostByName(ntpServerName, timeServerIP); // Get the IP address of the NTP server
   Serial.print("Time server IP:\t");
@@ -577,10 +588,11 @@ void loop(){
   }
   yield();
   // put your main code here, to run repeatedly:
-      String time1=hour()+"."+minute();
       dataLog[0]=timeUNIX;
       dataLog[1]= dataLog[1]==0?(float)ESP.getVcc()/1000.0 : (dataLog[1]+(float)ESP.getVcc()/1000.0)/2;
       dataLog[2]=dataLog[2]==0?ESP.getFreeHeap():(dataLog[2]+ESP.getFreeHeap())/2;
+      dataLog[3]=dataLog[3]==0?ESP.getHeapFragmentation():(dataLog[3]+ESP.getHeapFragmentation())/2;
+      
       if(millis()-prevDataLogTime>dataLogTimeout){
       logReadings();
       dataLog[1]=0;
@@ -712,10 +724,11 @@ void handleFirebase(){
   if(millis()-lastfirebasesync>firebasesynctimeout){
     lastfirebasesync=millis();
     // set value
-  String lastsync=String(year())+"/"+month()+"/"+day()+"-"+hour()+":"+minute()+":"+second();
+  String lastsync=String(year())+"/"+String(month())+"/"+String(day())+"-"+String(hour())+":"+String(minute())+":"+String(second());
 
   Firebase.setString("lastsync", lastsync);
-  // handle error
+  lastsync=String ();
+// handle error
   if (Firebase.failed()) {
       Serial.print("setting /lastsync failed:");
       Serial.println(Firebase.error());  
@@ -757,7 +770,7 @@ void handleFirebase(){
       return;
   }
  delay(1000);
-String name;
+String named="ok";
   // append a new value to /logs
   String jsonText="{\"";
   jsonText+=dataLogTitle[0];
@@ -766,17 +779,28 @@ String name;
   for (int i=1;i<NUM_READINGS;i++)
      jsonText+= ",\""+dataLogTitle[i]+"\":"+dataLog[i];
      jsonText +="}";
+  Serial.print("Pushing json text:");Serial.println(jsonText);
   // handle error
-  yield();
-  name  = Firebase.pushString("/data/",jsonText);
+  StaticJsonBuffer<200> jsonBuffer;
+    JsonObject& root = jsonBuffer.createObject();
+    char json[200];
+    String timeString=String(year())+"/"+String(month())+"/"+String(day())+"/"+String(hour())+":"+String(minute())+":"+String(second());
+    root["time"] = timeString;
+    for (int i=0;i<NUM_READINGS;i++){
+      root[dataLogTitle[i]]=dataLog[i];
+    }
+    root.printTo(json, 200);
+    Firebase.set("/data/"+timeString,root);
+
+  //Firebase.pushString("/data/",jsonText);
   if (Firebase.failed()) {
       Serial.print("pushing /logs failed:");
       Serial.println(Firebase.error());  
       return;
   }
   Serial.print("pushed: /logs/");
-  Serial.println(name);
-  delay(2000);
+  Serial.println(named);
+//  delay(2000);
   }
 }
 
