@@ -9,6 +9,7 @@
 #include <SPIFFSEditor.h>
 #include <FS.h>
 #define ONE_HOUR 3600000UL
+#define TEN_MINUTES 600
 #include <WiFiUdp.h>
 #include <Ticker.h>
 #include <TimeLib.h>
@@ -356,8 +357,8 @@ void setup(){
   });
 
   server.on("/firebase", HTTP_GET, [](AsyncWebServerRequest *request){
-  Serial.print("Delete requested:");
-  String response;//="<meta http-equiv='refresh' content='10;url=/csv.html' />";
+  Serial.print("Firebase settings requested:");
+  String response="";//="<meta http-equiv='refresh' content='10;url=/csv.html' />";
   if(request->hasParam("batchsync")){
     Serial.println("batch sync Parameter filename found");
   AsyncWebParameter* p = request->getParam("batchsync");
@@ -539,7 +540,7 @@ void loop(){
   uint32_t time = getNtpTime();                   // Check if the time server has responded, if so, get the UNIX time
   if (time) {
     timeUNIX = time;
-    Serial.print("NTP response:\t");
+    Serial.print("getNTP() returned:\t");
     Serial.println(timeUNIX);
     lastNTPResponse = millis();
   } else if ((millis() - lastNTPResponse) > 24UL * ONE_HOUR) {
@@ -582,9 +583,6 @@ void loop(){
     }*/
   } 
   else {                                    // If we didn't receive an NTP response yet, send another request
-    Serial.println("No response from NTP server; resend NTP packet again");
-    sendNTPpacket(timeServerIP);
-    delay(500);
   }
   yield();
   // put your main code here, to run repeatedly:
@@ -597,10 +595,14 @@ void loop(){
       logReadings();
       dataLog[1]=0;
       dataLog[2]=0;
+      dataLog[3]=0;
       prevDataLogTime=millis();
       }
   yield();
-  handleFirebase();
+  if(millis()-lastfirebasesync>firebasesynctimeout){
+    lastfirebasesync=millis();
+    handleFirebase();
+  }
   delay(1000);
   
 }
@@ -615,7 +617,7 @@ void startUDP() {
 void getData() {
   int vcc = ESP.getVcc();Serial.println(vcc);
 //  Serial.println(bmp.readTemperature());
-  String json = "{\"value\":";
+  String json = "{\"Vcc\":";
   json+=vcc;
      json += ",\"heap\":",
   json+=ESP.getFreeHeap();
@@ -656,6 +658,21 @@ void getData() {
 //  Serial.println("Converted Cstyle string is:");Serial.println(json.c_str());
 //  Serial.println("Length:");json.length();
     ws.textAll((char*)json.c_str());
+    json =String ();
+    json= "{\"";
+    json +=dataLogTitle[0];
+    json +="\":";
+    json +=dataLog[0];
+    for (int i=1;i<1;i++){
+      json +=",\"";
+      json +=dataLogTitle[i];
+      json += "\"";
+      json +=":";
+      json +=dataLog[i];
+    }
+    json += "}";
+    ws.textAll((char*)json.c_str());
+
 //  webSocket.broadcastTXT(json.c_str(), json.length());
 }
 
@@ -674,6 +691,10 @@ void sendNTPpacket(IPAddress& address) {
 long getNtpTime() { // Check if the time server has responded, if so, get the UNIX time, otherwise, return 0
   if (UDP.parsePacket() == 0) { // If there's no response (yet)
     Serial.print("No response from NTP");
+    Serial.println("\nNo response from NTP server; resend NTP packet again");
+    sendNTPpacket(timeServerIP);
+    delay(500);
+
     return epoch;
   }
   UDP.read(packetBuffer, NTP_PACKET_SIZE); // read the packet into the buffer
@@ -690,7 +711,7 @@ long getNtpTime() { // Check if the time server has responded, if so, get the UN
   SPIFFS.remove(".ntptime");
   File f=SPIFFS.open(".ntptime","w");
   if(f){
-    Serial.print("Writing new time to .ntptime");Serial.println(epoch);
+    Serial.print("\nWriting new time to .ntptime:");Serial.println(epoch);
     f.print(epoch);
     f.close();
   }
@@ -721,39 +742,28 @@ String getContentType(String fileName) { // determine the filetype of a given fi
 
 void handleFirebase(){
   yield();
-  if(millis()-lastfirebasesync>firebasesynctimeout){
-    lastfirebasesync=millis();
-    // set value
-  String lastsync=String(year())+"/"+String(month())+"/"+String(day())+"-"+String(hour())+":"+String(minute())+":"+String(second());
+  String timeString=String(year())+"/"+String(month())+"/"+String(day())+"/"+String(hour())+":"+String(minute())+":"+String(second());
 
-  Firebase.setString("lastsync", lastsync);
-  lastsync=String ();
+    // set value
+//  String lastsync=String(year())+"/"+String(month())+"/"+String(day())+"-"+String(hour())+":"+String(minute())+":"+String(second());
+
+  Firebase.setString("lastsync", timeString);
+//  lastsync=String ();
 // handle error
   if (Firebase.failed()) {
       Serial.print("setting /lastsync failed:");
       Serial.println(Firebase.error());  
-      return;
-  }
-//  delay(1000);
-  
-  // update value
-  // handle error
-  if (Firebase.failed()) {
-      Serial.print("setting /number failed:");
-      Serial.println(Firebase.error());  
-      return;
+//      return;
   }
   delay(1000);
+  
 
+/*
   // get value 
   Serial.print("number: ");
   Serial.println(Firebase.getString("lastsync"));
   delay(1000);
-
-  // remove value
-//  Firebase.remove("lastsync");
-//  delay(1000);
-
+*/
   // set string value
 
   
@@ -769,8 +779,7 @@ void handleFirebase(){
       Serial.println(Firebase.error());  
       return;
   }
- delay(1000);
-String named="ok";
+
   // append a new value to /logs
   String jsonText="{\"";
   jsonText+=dataLogTitle[0];
@@ -784,7 +793,6 @@ String named="ok";
   StaticJsonBuffer<200> jsonBuffer;
     JsonObject& root = jsonBuffer.createObject();
     char json[200];
-    String timeString=String(year())+"/"+String(month())+"/"+String(day())+"/"+String(hour())+":"+String(minute())+":"+String(second());
     root["time"] = timeString;
     for (int i=0;i<NUM_READINGS;i++){
       root[dataLogTitle[i]]=dataLog[i];
@@ -799,9 +807,7 @@ String named="ok";
       return;
   }
   Serial.print("pushed: /logs/");
-  Serial.println(named);
-//  delay(2000);
-  }
+
 }
 
 void readFile(){
@@ -854,7 +860,7 @@ SPIFFS.info(fs_info);
       // print the hour, minute and second:
 
   
-        String newpathname=dirname+oldFileName+"-"+year()+"-"+month()+"-"+day()+"-"+hour()+"-"+minute()+"-"+second()+".csv";
+        String newpathname=dirname+oldFileName+"/"+String(year())+"/"+String(month())+"/"+String(day())+"-"+hour()+"-"+minute()+"-"+second()+".csv";
         int i=0;
         while(SPIFFS.exists(newpathname)){//New pathname doesn't exist
           
